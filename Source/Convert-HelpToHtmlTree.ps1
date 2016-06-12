@@ -295,10 +295,18 @@ function Convert-HelpToHtmlTree
 
 	Write-Host "Target dir: $TargetDir"
 	$namespaceSummary = @{}
+   
 	$Namespaces |
 	# Convert wildcards (if any) in Namespaces parameter to instances
 	% {
-		Get-ChildItem $moduleRoot $_ } |
+	    $searchroot = $moduleRoot
+        if ($_.StartsWith(".") -or [system.io.path]::IsPathRooted($_)) {
+            $searchroot = Split-Path $_ -Parent
+            $_ = Split-Path $_ -Leaf
+        }
+    	$children = Get-ChildItem $searchroot $_
+        if (@($children).Length -eq 0) { Write-Verbose "namespace '$_' not found at root $searchroot" }
+        $children } |
 	% {
 		$namespace = $_.Name # Grab name out of DirectoryInfo object
 		Write-Host "Namespace: $namespace"
@@ -306,7 +314,7 @@ function Convert-HelpToHtmlTree
 		$script:moduleSummary = @{}
 		if ($DocTitle) { $title = "{0} {1}" -f $namespace, $DocTitle }
 		else { $title = "$namespace Namespace"}
-		$namespaceDir = Join-Path $moduleRoot $namespace
+		$namespaceDir = Join-Path $searchroot $namespace
 		$saveModuleCount = $moduleCount
 		Get-ChildItem $namespaceDir |
 			? { $_.PsIsContainer } |
@@ -324,7 +332,7 @@ function Convert-HelpToHtmlTree
 	if ($DocTitle) { $title = $DocTitle }
 	else { $title = "PowerShell API" }
 	if ($Namespaces.Count -eq 1) { $title = "{0} {1}" -f $Namespaces[0],$title }
-	Generate-HomePage $moduleRoot $title
+	Generate-HomePage $searchroot $title
 	Generate-ContentsPage $title
 	if ($noModulesFlagged) {
 		write-warning "Note that 'No modules found' typically indicates your"
@@ -381,8 +389,8 @@ function Process-Module($namespace, $moduleName, $parentTitle)
 	$qualifiedModName = (join-Path $namespace $moduleName)
 	if (! (Get-Module $moduleName -ListAvailable))
 	{ [void](Handle-MissingValue "No objects found") }
-	elseif (! (Import-MostModules $qualifiedModName))
-	{ [void](Handle-MissingValue "Cannot load $qualifiedModName module") }
+	elseif (! (Import-MostModules $moduleName))
+	{ [void](Handle-MissingValue "Cannot load $moduleName ($qualifiedModName) module") }
 	else {
 		if (!$parentTitle) { $parentTitle = "{0} Namespace" -f $namespace }
 		$moduleDocPath = Join-Path $TargetDir (Join-Path $namespace $moduleName)
@@ -658,7 +666,8 @@ function Get-OverviewContent([string]$overviewPath)
 # Trim off the module directory prefix.
 function Get-RelevantPath($path)
 {
-	$path.substring($moduleRoot.Length+1)
+    $path
+	#$path.substring($moduleRoot.Length+1)
 }
 
 function Handle-MissingValue($message)
@@ -677,7 +686,7 @@ function Import-MostModules($qModuleName)
 	# Need to remove it first in case already loaded in the current shell.
 	# Otherwise, module properties in template could show two values!
 	Remove-Module $qModuleName -ErrorAction SilentlyContinue
-	Import-Module $qModuleName -force
+	Import-Module $qModuleName -force 
 	return ! (!$?)
 }
 
